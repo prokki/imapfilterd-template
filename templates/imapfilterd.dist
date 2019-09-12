@@ -1,0 +1,216 @@
+#!/bin/sh
+# -----------------------------------------------------------------------------
+#
+#   imapfilter daemon (user@domain.tld)
+#   Copyright (C) 2019, Falko Matthies
+#
+#   This program is free software: you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation, either version 3 of the License, or
+#   (at your option) any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# -----------------------------------------------------------------------------
+#
+#   This file was created automatically. Do only change allowed parts
+#   within this script!
+#
+# -----------------------------------------------------------------------------
+#
+### BEGIN INIT INFO
+# Provides:          imapfilterd-user-domain-tld
+# Required-Start:    $all
+# Required-Stop:
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: imapfilter daemon (user@domain.tld)
+# Description:       imapfilter daemon responsible for filtering mails of
+#                    mail account user@domain.tld
+### END INIT INFO
+
+
+
+# -----------------------------------------------------------------------------
+# Properties: Modify for your needs
+# -----------------------------------------------------------------------------
+
+IMAPFILTER_CONFIG="/path/to/filter/user_domain_tld.lua"
+
+# optional, but recommended
+IMAPFILTER_LOG="/path/to/log/user_domain_tld.log"
+
+# optional
+#IMAPFILTER_ERROR_LOG="/path/to/log/user_domain_tld.error.log"
+
+# a description used to display on script usage in command line
+# same as "Short-Description"
+IMAPFILTER_DAEMON_TITLE="imapfilter daemon (user@domain.tld)"
+
+# a unique name used to identify the daemon
+# use alphanumeric character only (no special characters, no whitespaces, etc.)
+# same as "Provides"
+IMAPFILTER_DAEMON_NAME="imapfilterd-user-domain-tld"
+
+
+
+
+
+# -----------------------------------------------------------------------------
+# DO NOT MODIFY BELOW THIS LINE!
+# -----------------------------------------------------------------------------
+
+######## Script variables
+
+# IMAPFILTER_DAEMON_CMD
+IMAPFILTER_DAEMON_CMD="imapfilter -c ${IMAPFILTER_CONFIG}"
+if [ -n "${IMAPFILTER_ERROR_LOG}" ]
+then
+    IMAPFILTER_DAEMON_CMD="${IMAPFILTER_DAEMON_CMD} -l ${IMAPFILTER_ERROR_LOG}"
+fi
+if [ -n "${IMAPFILTER_LOG}" ]
+then
+    IMAPFILTER_DAEMON_CMD="${IMAPFILTER_DAEMON_CMD} -d ${IMAPFILTER_LOG}"
+fi
+
+
+
+######## Define functions
+
+check_root () {
+
+    if [ "$(id -u)" != "0" ]
+    then
+        echo "Error #1: Run ${SCRIPT} only as root user!" >&2
+        exit 1
+    fi
+}
+
+server_log () {
+    if [ -n "${IMAPFILTER_LOG}" ]
+    then
+        echo "$(date +[%Y-%m-%d\ %H:%M:%S%:z]) $1" >> ${IMAPFILTER_LOG}
+    fi
+}
+
+server_running_pids () {
+    local pids=""
+    for pid in $(pidof imapfilter)
+    do
+        cmd=$(ps -o cmd fp "${pid}" | tail -n 1)
+        if [ -z "${cmd##*$IMAPFILTER_CONFIG*}" ]
+        then
+            pids="${pids} ${pid}"
+        fi
+    done
+    if [ -n "${pids}" ]
+    then
+        pids=$(echo "${pids}"| cut -c2-)
+        echo "${pids}"
+    fi
+}
+
+server_is_running () {
+    local pids_str=$(server_running_pids)
+    if [ -n "${pids_str}" ]
+    then
+        echo "1"
+    fi
+}
+
+server_start () {
+    echo -n "Starting ${IMAPFILTER_DAEMON_NAME}"
+    cd $(dirname "${IMAPFILTER_CONFIG}")
+    ${IMAPFILTER_DAEMON_CMD} 2>&1 > /dev/null &
+    echo " ... done."
+}
+
+server_kill () {
+    echo -n "Stopping ${IMAPFILTER_DAEMON_NAME}"
+
+    for pid in $(server_running_pids)
+    do
+        kill -9 "${pid}"
+    done
+
+    echo " ... done."
+}
+
+check_command () {
+    if ! which $1 >/dev/null
+    then
+        echo "1"
+    fi
+}
+
+check_commands () {
+    local required_commands="imapfilter"
+    for required_command in ${required_commands}
+    do
+        if [ -n "$(check_command ${required_command})" ]
+        then
+            echo "Error: \"${required_command}\" is not installed." >&2
+            exit 1
+        fi
+    done
+}
+
+check_requirements () {
+    check_root
+    check_commands
+}
+
+
+
+########  Run statements
+
+check_requirements
+
+case "$1" in
+	start)
+		if [ -n "$(server_is_running)" ]
+		then
+			echo "${IMAPFILTER_DAEMON_TITLE} is already running"
+		else
+			server_start
+		fi
+		;;
+
+	stop)
+		if [ -n "$(server_is_running)" ]
+		then
+			server_kill
+		else
+			echo "Couldn't find a running ${IMAPFILTER_DAEMON_TITLE}"
+		fi
+		;;
+
+	restart)
+		if [ -n "$(server_is_running)" ]
+		then
+			server_kill
+		else
+			echo "Couldn't find a running ${IMAPFILTER_DAEMON_TITLE}"
+		fi
+
+		server_start
+		;;
+
+	status)
+		[ -n "$(server_is_running)" ] && echo "${IMAPFILTER_DAEMON_TITLE} is UP" || echo "${IMAPFILTER_DAEMON_TITLE} is DOWN"
+    	;;
+
+
+	*)
+		echo "Usage: $0 {start|stop|status|restart}"
+		exit 1
+		;;
+esac
+
+exit 0
