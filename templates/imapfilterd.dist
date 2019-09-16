@@ -41,23 +41,26 @@
 # Properties: Modify for your needs
 # -----------------------------------------------------------------------------
 
-IMAPFILTER_CONFIG="/path/to/filter/user_domain_tld.lua"
+CONFIG_FILE="/path/to/filter/user_domain_tld.lua"
 
 # optional, but recommended
-IMAPFILTER_LOG="/path/to/log/user_domain_tld.log"
+LOG_FILE="/path/to/log/user_domain_tld.log"
 
 # optional
-#IMAPFILTER_ERROR_LOG="/path/to/log/user_domain_tld.error.log"
+#ERROR_LOG_FILE="/path/to/log/user_domain_tld.error.log"
 
 # a description used to display on script usage in command line
 # same as "Short-Description"
-IMAPFILTER_DAEMON_TITLE="imapfilter daemon (user@domain.tld)"
+DESC="imapfilter daemon (user@domain.tld)"
 
 # a unique name used to identify the daemon
 # use alphanumeric character only (no special characters, no whitespaces, etc.)
 # same as "Provides"
-IMAPFILTER_DAEMON_NAME="imapfilterd-user-domain-tld"
+NAME="imapfilterd-user-domain-tld"
 
+# the default user to run this script
+# if no user is set, the current root user is used
+USER=""
 
 
 
@@ -68,34 +71,47 @@ IMAPFILTER_DAEMON_NAME="imapfilterd-user-domain-tld"
 
 ######## Script variables
 
-# IMAPFILTER_DAEMON_CMD
-IMAPFILTER_DAEMON_CMD="imapfilter -c ${IMAPFILTER_CONFIG}"
-if [ -n "${IMAPFILTER_ERROR_LOG}" ]
+# DAEMON
+DAEMON="/usr/bin/imapfilter"
+
+# ARGS
+ARGS="-c ${CONFIG_FILE}"
+if [ -n "${ERROR_LOG_FILE}" ]
 then
-    IMAPFILTER_DAEMON_CMD="${IMAPFILTER_DAEMON_CMD} -l ${IMAPFILTER_ERROR_LOG}"
+    ARGS="${ARGS} -l ${ERROR_LOG_FILE}"
 fi
-if [ -n "${IMAPFILTER_LOG}" ]
+if [ -n "${LOG_FILE}" ]
 then
-    IMAPFILTER_DAEMON_CMD="${IMAPFILTER_DAEMON_CMD} -d ${IMAPFILTER_LOG}"
+    ARGS="${ARGS} -d ${LOG_FILE}"
+fi
+
+# start-stop-daemon option
+SSD_OPTIONS="--quiet"
+if [ -n "${USER}" ] && [ "${USER}" != "0" ] && [ "${USER}" != "root" ]
+then
+    SSD_OPTIONS="${SSD_OPTIONS} --chuid=${USER}"
 fi
 
 
 
 ######## Define functions
 
-check_root () {
-
-    if [ "$(id -u)" != "0" ]
+check_user () {
+    if [ -n "${USER}" ] && [ "${USER}" != "0" ] && [ "${USER}" != "root" ]
     then
-        echo "Error #1: Run ${SCRIPT} only as root user!" >&2
-        exit 1
+        id "${USER}" 2>&1 >/dev/null
+        if [ $? -ne 0 ]
+        then
+            echo "Error #22: User \"${USER}\" does not exist. Please change the configured user." >&2
+            exit 22
+        fi
     fi
 }
 
 server_log () {
-    if [ -n "${IMAPFILTER_LOG}" ]
+    if [ -n "${LOG_FILE}" ]
     then
-        echo "$(date +[%Y-%m-%d\ %H:%M:%S%:z]) $1" >> ${IMAPFILTER_LOG}
+        echo "$(date +[%Y-%m-%d\ %H:%M:%S%:z]) $1" >> ${LOG_FILE}
     fi
 }
 
@@ -104,7 +120,7 @@ server_running_pids () {
     for pid in $(pidof imapfilter)
     do
         cmd=$(ps -o cmd fp "${pid}" | tail -n 1)
-        if [ -z "${cmd##*$IMAPFILTER_CONFIG*}" ]
+        if [ -z "${cmd##*${CONFIG_FILE}*}" ]
         then
             pids="${pids} ${pid}"
         fi
@@ -116,7 +132,7 @@ server_running_pids () {
     fi
 }
 
-server_is_running () {
+is_running () {
     local pids_str=$(server_running_pids)
     if [ -n "${pids_str}" ]
     then
@@ -124,22 +140,26 @@ server_is_running () {
     fi
 }
 
-server_start () {
-    echo -n "Starting ${IMAPFILTER_DAEMON_NAME}"
-    cd $(dirname "${IMAPFILTER_CONFIG}")
-    ${IMAPFILTER_DAEMON_CMD} 2>&1 > /dev/null &
-    echo " ... done."
+do_start () {
+    echo -n "Starting ${NAME}... "
+    start-stop-daemon --start --oknodo --background ${SSD_OPTIONS} --chdir $(dirname ${CONFIG_FILE}) --exec ${DAEMON} -- ${ARGS}
+    if [ $? -ne 0 ]
+    then
+        echo "failed"
+    else
+        echo "done"
+    fi
 }
 
-server_kill () {
-    echo -n "Stopping ${IMAPFILTER_DAEMON_NAME}"
+do_stop () {
+    echo -n "Stopping ${NAME}... "
 
     for pid in $(server_running_pids)
     do
-        kill -9 "${pid}"
+        kill -15 ${pid} >/dev/null && wait ${pid} >/dev/null
     done
 
-    echo " ... done."
+    echo "done"
 }
 
 check_command () {
@@ -150,60 +170,100 @@ check_command () {
 }
 
 check_commands () {
-    local required_commands="imapfilter"
-    for required_command in ${required_commands}
-    do
-        if [ -n "$(check_command ${required_command})" ]
+    if [ ! -x ${DAEMON} ]
+    then
+        echo "Error: \"${DAEMON}\" is not installed." >&2
+        exit 1
+    fi
+}
+
+check_permission_log_dir () {
+    if [ -n "${USER}" ] && [ "${USER}" != "0" ] && [ "${USER}" != "root" ]
+    then
+        if [ -n "${1}" ]
         then
-            echo "Error: \"${required_command}\" is not installed." >&2
-            exit 1
+            runuser -l "${USER}" -c "[ -f \"${1}\" ]"
+            if [ $? -ne 0 ]
+            then
+
+                parent_dir="$(dirname ${1})"
+                if [ ! -d "${parent_dir}" ]
+                then
+                    mkdir -p "${parent_dir}"
+                fi
+                touch "${1}"
+                chown "${USER}":"$(id -g -n ${USER})" "${1}"
+            else
+                runuser -l "${USER}" -c "[ -w \"${1}\" ]"
+                if [ $? -ne 0 ]
+                then
+                    echo "Error #2: Unable to access log file \"${1}\" Please check file permissions." >&2
+                    exit 2
+                fi
+            fi
         fi
-    done
+    fi
+}
+
+check_config_file () {
+    if [ -n "${USER}" ] && [ "${USER}" != "0" ] && [ "${USER}" != "root" ]
+    then
+        runuser -l ${USER} -c "[ -f \"${CONFIG_FILE}\" ]"
+        if [ $? -ne 0 ]
+        then
+            echo "Error #2: Unable to read config file \"${CONFIG_FILE}\" Please check file permissions." >&2
+            exit 2
+        fi
+    fi
 }
 
 check_requirements () {
-    check_root
+    check_user
     check_commands
+    check_config_file
+    check_permission_log_dir "${LOG_FILE}"
+    check_permission_log_dir "${ERROR_LOG_FILE}"
 }
 
 
 
 ########  Run statements
 
+
 check_requirements
 
 case "$1" in
 	start)
-		if [ -n "$(server_is_running)" ]
+		if [ -n "$(is_running)" ]
 		then
-			echo "${IMAPFILTER_DAEMON_TITLE} is already running"
+			echo "${DESC} is already running"
 		else
-			server_start
+			do_start
 		fi
 		;;
 
 	stop)
-		if [ -n "$(server_is_running)" ]
+		if [ -n "$(is_running)" ]
 		then
-			server_kill
+			do_stop
 		else
-			echo "Couldn't find a running ${IMAPFILTER_DAEMON_TITLE}"
+			echo "Couldn't find a running ${DESC}"
 		fi
 		;;
 
 	restart)
-		if [ -n "$(server_is_running)" ]
+		if [ -n "$(is_running)" ]
 		then
-			server_kill
+			do_stop
 		else
-			echo "Couldn't find a running ${IMAPFILTER_DAEMON_TITLE}"
+			echo "Couldn't find a running ${DESC}"
 		fi
 
-		server_start
+		do_start
 		;;
 
 	status)
-		[ -n "$(server_is_running)" ] && echo "${IMAPFILTER_DAEMON_TITLE} is UP" || echo "${IMAPFILTER_DAEMON_TITLE} is DOWN"
+		[ -n "$(is_running)" ] && echo "${DESC} is UP" || echo "${DESC} is DOWN"
     	;;
 
 

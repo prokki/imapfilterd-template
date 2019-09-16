@@ -38,7 +38,6 @@ IMAPFILTER_DAEMON_TEMPLATE="${SCRIPTPATH}/../templates/imapfilterd.dist"
 ####################################################################################
 
 check_not_root () {
-
     if [ "$(id -u)" = "0" ]
     then
         echo "Error #1: Do not run ${SCRIPT} as root user!" >&2
@@ -104,16 +103,23 @@ option_check_log_directory () {
             echo "Error #21: Not able to create directory \"${1}\"." >&2
             exit 21
         fi
-        sudo chown "$(id -u -n)":"$(id -g -n)" "${2}" 2>/dev/null
+
+        if [ ! -w "${parent_dir}" ]
+        then
+            sudo chown "${3}":"$(id -g -n ${3})" "${2}" 2>/dev/null
+        else
+            chown "${3}":"$(id -g -n ${3})" "${2}" 2>/dev/null
+        fi
+
         if [ $? -ne 0 ]
         then
-            echo "Error #22: Not able to set directory permissions to \"${2}\"" >&2
+            echo "Error #22: Not able to set directory permissions for user \"${3}\" to \"${2}\"" >&2
             exit 22
         fi
-    elif [ ! -w "${1}" ]
-    then
-        echo "Error #25: Directory \"${2}\" is not writeable. Please check file permissions." >&2
-        exit 25
+#    elif [ ! -w "${1}" ]
+#    then
+#        echo "Error #25: Directory \"${2}\" is not writeable. Please check file permissions." >&2
+#        exit 25
     fi
 }
 
@@ -122,10 +128,10 @@ option_check_config_file () {
     then
         echo "Error: Passed imapfilter config file \"${1}\" was not found. Please check option \"--config\"." >&2
         exit 1
-    elif [ ! -r "${1}" ]
-    then
-        echo "Error: Passed imapfilter config file \"${1}\" is not readable. Please check option \"--config\"." >&2
-        exit 2
+#    elif [ ! -r "${1}" ]
+#    then
+#        echo "Error: Passed imapfilter config file \"${1}\" is not readable. Please check option \"--config\"." >&2
+#        exit 2
     fi
 }
 
@@ -134,6 +140,48 @@ option_check_log_mode () {
     then
         echo "Error #11: Passed log mode \"${1}\" is invalid. Please check option \"--log-mode\"." >&2
         exit 1
+    fi
+}
+
+option_check_user () {
+    if [ -z "${1}" ]
+    then
+        echo "Error #12: No valid user passed. Please check option \"--user\"." >&2
+        exit 12
+    elif [ "${1}" = "0" ] || [ "${1}" = "root" ]
+    then
+        echo "\nIt is strongly recommend to NOT run the daemon with user root."
+        echo -n "Are you sure to use user root? (y/n) [n]: "
+
+        read inp
+
+        local lower_inp="$(echo "${inp}" | sed -e "s/\(.*\)/\L\1/")"
+
+        if [ -z "${lower_inp}" ] || [ "${lower_inp}" != "y" -a "${lower_inp}" != "yes" ]
+        then
+            echo "Not sure :-) Good Bye!"
+            echo
+            exit 0
+        fi
+    else
+        id "${1}" 1>/dev/null
+        if [ $? -ne 0 ]
+        then
+            echo "\nWARNING: User \"${1}\" does not exist. Please check option \"--user\"." 2>/dev/null
+
+            echo -n "Are you sure you want to proceed? (y/n) [n]: "
+
+            read inp
+
+            local lower_inp="$(echo "${inp}" | sed -e "s/\(.*\)/\L\1/")"
+
+            if [ -z "${lower_inp}" ] || [ "${lower_inp}" != "y" -a "${lower_inp}" != "yes" ]
+            then
+                echo "Not sure :-) Good Bye!"
+                echo
+                exit 0
+            fi
+        fi
     fi
 }
 
@@ -158,11 +206,11 @@ copy_daemon () {
 
         if [ ! -w "${dest}" ]
         then
-            echo "Creating file ${dest} with root permissions... " >&2
+            echo "Overwriting file ${dest} with root permissions... " >&2
             sudo cp "${src}" "${dest}"  2>/dev/null
             sudo chmod +x "${dest}" 2>/dev/null
         else
-            echo -n "Creating file ${dest}... "
+            echo -n "Overwriting file ${dest}... "
             cp "${src}" "${dest}"  2>/dev/null
             chmod +x "${dest}" 2>/dev/null
         fi
@@ -188,7 +236,7 @@ copy_daemon () {
 display_help () {
     cat << EOL
 Usage: ./$(basename ${SCRIPT}) --config=PATH
-       [--mail=ADDRESS] [--log-dir=PATH] [--log-mode=MODE]
+       [--mail=ADDRESS] [--log-dir=PATH] [--log-mode=MODE] [--user=USER]
        [--autostart] [--verbose]
 
 Installs an imapfilter daemon for the specified imapfilter config file.
@@ -219,6 +267,13 @@ Installs an imapfilter daemon for the specified imapfilter config file.
 -m, --mail=ADDRESS    [optional]
                       A mail address to describe the daemon
 
+-u, --user=USER       [optional, default=current user]
+                      By default, the user which runs this command
+                      is used to execute the daemon. To use a different user
+                      specify the --user option.
+                      Take care of permissions, if your are running multiple
+                      imapfilter daemons!
+
 -v, --verbose         [optional]
                       Runs the script in verbose mode.
                       Will print out each step of execution.
@@ -235,19 +290,21 @@ Examples:
    ./$(basename ${SCRIPT}) \\
        --config=/home/john_doe/.imapfilter/imapfilter.lua \\
        --mail=john.doe@example.com \\
+       --user=imapfilter
        --log-mode=0
 
    ./$(basename ${SCRIPT}) \\
        -c/home/john_doe/.imapfilter/imapfilter.lua \\
-       -mjohn.doe@example.com \\
-       -l0
+       -mjohn.doe@example.com -uimapfilter -l0
 
 3. Create the daemon with a custom log directory and installs the daemon
-   to start automatically at the end of the boot process:
+   to start automatically at the end of the boot process as
+   user "imapfilter":
 
    ./$(basename ${SCRIPT}) \\
        --config=/home/john_doe/.imapfilter/imapfilter.lua \\
        --log-dir=/home/john_doe/.imapfilter/logs \\
+       --user=imapfilter \\
        --autostart
 
 EOL
@@ -273,6 +330,7 @@ do
     fi
 done
 
+IMAPFILTER_DAEMON_USER="$(id -u -n)"
 IMAPFILTER_AUTOSTART=0
 IMAPFILTER_VERBOSE=0
 IMAPFILTER_FILTER_CONFIG=""
@@ -285,7 +343,7 @@ IMAPFILTER_LOG_MODE="3"
 # -l is for long options with double dash like --version
 # the comma separates different long options
 # -a is for long options with single dash like -version
-options=$(getopt -l "autostart,config:,mail::,log-dir::,log-mode::,verbose" -o "ac:d::l::m::v" -- "${@}")
+options=$(getopt -l "autostart,config:,mail::,log-dir::,log-mode::,user::,verbose" -o "ac:d::l::m::u::v" -- "${@}")
 
 # set --:
 # If no arguments follow this option, then the positional parameters are unset. Otherwise, the positional parameters
@@ -314,6 +372,10 @@ do
             shift
             IMAPFILTER_MAIL_ADDRESS="${1}"
             ;;
+        "-u"|"--user")
+            shift
+            IMAPFILTER_DAEMON_USER="${1}"
+            ;;
         "-v"|"--verbose")
             IMAPFILTER_VERBOSE=1
             set -xv  # Set xtrace and verbose mode.
@@ -329,6 +391,9 @@ done
 check_requirements
 
 ###### options_check #######
+
+
+option_check_user "${IMAPFILTER_DAEMON_USER}"
 
 # absolute path of imapfilter config file, i.e. "/path/to/filter/john_doe_example_com.lua"
 if [ -z "${IMAPFILTER_FILTER_CONFIG}" ]
@@ -347,7 +412,7 @@ option_check_log_mode "${IMAPFILTER_LOG_MODE}"
 if [ ${IMAPFILTER_LOG_MODE} != "0" ]
 then
     LINK_IMAPFILTER_LOG_DIR=$(readlink -f "${IMAPFILTER_LOG_DIR}")
-    option_check_log_directory "${IMAPFILTER_LOG_DIR}" "${LINK_IMAPFILTER_LOG_DIR}"
+    option_check_log_directory "${IMAPFILTER_LOG_DIR}" "${LINK_IMAPFILTER_LOG_DIR}" "${IMAPFILTER_DAEMON_USER}"
 else
     LINK_IMAPFILTER_LOG_DIR="${IMAPFILTER_LOG_DIR}"
 fi
@@ -366,7 +431,6 @@ fi
 
 
 
-
 # daemon name
 DAEMON_FILE_NAME="imapfilterd-${IMAPFILTER_FILTER_CONFIG_BASENAME_MINUS}"
 
@@ -377,21 +441,29 @@ sed -i -e "s/user@domain\.tld/${IMAPFILTER_MAIL_ADDRESS}/g" "${DAEMON_TEMP_FILE}
 sed -i -e "s/imapfilterd-user-domain-tld/${DAEMON_FILE_NAME}/g" "${DAEMON_TEMP_FILE}"
 sed -i -E -e "s/^(# Provides:\s+)[^\s].*$/\1${DAEMON_FILE_NAME}/g" "${DAEMON_TEMP_FILE}"
 sed -i -e "s/2019, Falko Matthies/$(date '+%Y')/g" "${DAEMON_TEMP_FILE}"
-sed -i -E -e "s/^(IMAPFILTER_CONFIG)=.*$/\1=\"$(echo "${IMAPFILTER_FILTER_CONFIG}" | sed -e "s/\//\\\\\//g")\"/g" "${DAEMON_TEMP_FILE}"
+sed -i -E -e "s/^(CONFIG_FILE)=.*$/\1=\"$(echo "${IMAPFILTER_FILTER_CONFIG}" | sed -e "s/\//\\\\\//g")\"/g" "${DAEMON_TEMP_FILE}"
+
+DISABLE=""
+if [ "${IMAPFILTER_DAEMON_USER}" = "0" ] || [ "${IMAPFILTER_DAEMON_USER}" = "root" ]
+then
+    IMAPFILTER_DAEMON_USER=""
+    DISABLE="#"
+fi
+sed -i -E -e "s/^\s*#?\s*(USER)=.*$/${DISABLE}\1=\"${IMAPFILTER_DAEMON_USER}\"/g" "${DAEMON_TEMP_FILE}"
 
 DISABLE=""
 if [ "${IMAPFILTER_LOG_MODE}" != "1" ] && [ "${IMAPFILTER_LOG_MODE}" != "3" ]
 then
     DISABLE="#"
 fi
-sed -i -E -e "s/^#?(IMAPFILTER_LOG)=.*$/${DISABLE}\1=\"$(echo "${LINK_IMAPFILTER_LOG_DIR}" | sed -e "s/\//\\\\\//g")\/${IMAPFILTER_FILTER_CONFIG_BASENAME}.log\"/g" "${DAEMON_TEMP_FILE}"
+sed -i -E -e "s/^\s*#?\s*(LOG_FILE)=.*$/${DISABLE}\1=\"$(echo "${LINK_IMAPFILTER_LOG_DIR}" | sed -e "s/\//\\\\\//g")\/${IMAPFILTER_FILTER_CONFIG_BASENAME}.log\"/g" "${DAEMON_TEMP_FILE}"
 
 DISABLE=""
 if [ "${IMAPFILTER_LOG_MODE}" != "2" ] && [ "${IMAPFILTER_LOG_MODE}" != "3" ]
 then
     DISABLE="#"
 fi
-sed -i -E -e "s/^#?(IMAPFILTER_ERROR_LOG)=.*$/${DISABLE}\1=\"$(echo "${LINK_IMAPFILTER_LOG_DIR}" | sed -e "s/\//\\\\\//g")\/${IMAPFILTER_FILTER_CONFIG_BASENAME}.error.log\"/g" "${DAEMON_TEMP_FILE}"
+sed -i -E -e "s/^\s*#?\s*(ERROR_LOG_FILE)=.*$/${DISABLE}\1=\"$(echo "${LINK_IMAPFILTER_LOG_DIR}" | sed -e "s/\//\\\\\//g")\/${IMAPFILTER_FILTER_CONFIG_BASENAME}.error.log\"/g" "${DAEMON_TEMP_FILE}"
 
 # destination file in /etc/init.d
 DAEMON_FILE=$(readlink -f "${INIT_DIR}/${DAEMON_FILE_NAME}")
