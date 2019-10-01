@@ -116,3 +116,7 @@ Examples:
 * [ ] [README.md](README.md): how to install/remove the daemon manually, https://wiki.debian.org/LSBInitScripts
 * [ ] exit numbers: check/clean up + list in readme
 * [ ] fix add >&2
+
+
+https://wiki.debian.org/Daemon
+https://superuser.com/questions/1062576/difference-between-su-c-and-runuser-l-c
