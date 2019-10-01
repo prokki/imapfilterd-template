@@ -480,9 +480,11 @@ fi
 
 echo "--------------------------"
 echo "How to proceed?"
-echo "1. Optional: Check daemon file, adapt settings"
-echo "2. Enable daemon (COMMAND start)"
-echo "3. Install autostart / rc"
+echo "1. Optional: Check the created daemon file and probably adapt settings"
+echo "   ${DAEMON_FILE}"
+echo "2. Enable daemon and check status"
+echo "   sudo ${DAEMON_FILE} start && sudo ${DAEMON_FILE} status"
+echo "3. If not done with installation binary: Enable autostart / install to rc"
 echo "4. On changes: use restart"
 echo "4. Remove: insserv -d + delete script"
 echo
