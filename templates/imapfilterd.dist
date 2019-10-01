@@ -74,6 +74,10 @@ USER=""
 # DAEMON
 DAEMON="/usr/bin/imapfilter"
 
+# the daemon name is necessary to run multiple instances of the same DAEMON command
+# usually the daemon name is limited to 15 chars
+DAEMON_NAME="$(echo \"${NAME}\" | md5sum | awk '{print substr($1,1,15)}')"
+
 # ARGS
 ARGS="-c ${CONFIG_FILE}"
 if [ -n "${ERROR_LOG_FILE}" ]
@@ -142,7 +146,7 @@ is_running () {
 
 do_start () {
     echo -n "Starting ${NAME}... "
-    start-stop-daemon --start --oknodo --background ${SSD_OPTIONS} --chdir $(dirname ${CONFIG_FILE}) --name ${NAME} -exec ${DAEMON} -- ${ARGS}
+    start-stop-daemon --start --oknodo --background ${SSD_OPTIONS} --chdir $(dirname ${CONFIG_FILE}) --name ${DAEMON_NAME} --exec ${DAEMON} -- ${ARGS}
     if [ $? -ne 0 ]
     then
         echo "failed"
