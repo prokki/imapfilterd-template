@@ -115,6 +115,7 @@ Examples:
 * [ ] [README.md](README.md): how to start/stop the daemon
 * [ ] [README.md](README.md): how to install/remove the daemon manually, https://wiki.debian.org/LSBInitScripts
 * [ ] exit numbers: check/clean up + list in readme
+* [ ] Better solution than to use md5checksum for daemon name?
 * [ ] fix add >&2
 
 
